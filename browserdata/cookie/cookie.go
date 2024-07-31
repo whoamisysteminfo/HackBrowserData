@@ -4,10 +4,8 @@ import (
 	"database/sql"
 	"log/slog"
 	"os"
-	"sort"
-	"time"
-
-	// import sqlite3 driver
+	"strings"
+	
 	_ "modernc.org/sqlite"
 
 	"github.com/moond4rk/hackbrowserdata/crypto"
@@ -28,21 +26,22 @@ func init() {
 type ChromiumCookie []cookie
 
 type cookie struct {
-	Host         string
-	Path         string
-	KeyName      string
+	Host         string      	`json:"domain"`
+	Path         string			`json:"path"`
+	KeyName      string			`json:"name"`
 	encryptValue []byte
-	Value        string
-	IsSecure     bool
-	IsHTTPOnly   bool
-	HasExpire    bool
-	IsPersistent bool
-	CreateDate   time.Time
-	ExpireDate   time.Time
+	Value        string			`json:"value"`
+	IsSecure     bool			`json:"secure"`
+	IsHTTPOnly   bool			`json:"httpOnly"`
+	Session      bool			`json:"session"`
+	IsHostKey	 bool			`json:"hostOnly"`
+	ExpireDate   float64	    `json:"expirationDate"`
+	SameSite	 string			`json:"sameSite"`
+	StoreId      string         `json:"storeId"`
 }
 
 const (
-	queryChromiumCookie = `SELECT name, encrypted_value, host_key, path, creation_utc, expires_utc, is_secure, is_httponly, has_expires, is_persistent FROM cookies`
+	queryChromiumCookie = `SELECT name, encrypted_value, host_key, path, creation_utc, expires_utc, is_secure, is_httponly, has_expires, is_persistent, samesite FROM cookies`
 )
 
 func (c *ChromiumCookie) Extract(masterKey []byte) error {
@@ -59,13 +58,34 @@ func (c *ChromiumCookie) Extract(masterKey []byte) error {
 	defer rows.Close()
 	for rows.Next() {
 		var (
-			key, host, path                               string
+			key, host, path, siteFlag                     string
 			isSecure, isHTTPOnly, hasExpire, isPersistent int
+			sameSite, hostOnly   						  int
 			createDate, expireDate                        int64
 			value, encryptValue                           []byte
 		)
-		if err = rows.Scan(&key, &encryptValue, &host, &path, &createDate, &expireDate, &isSecure, &isHTTPOnly, &hasExpire, &isPersistent); err != nil {
+		
+		if err = rows.Scan(&key, &encryptValue, &host, &path, &createDate, &expireDate, &isSecure, &isHTTPOnly, &hasExpire, &isPersistent, &sameSite); err != nil {
 			slog.Error("scan chromium cookie error", "err", err)
+		}
+		
+		switch sameSite {
+		case -1:
+			siteFlag = "unspecified"
+		case 0:
+			siteFlag = "no_restriction"
+		case 1:
+			siteFlag = "lax"
+		case 2:
+			siteFlag = "strict"
+		default:
+			siteFlag = "unspecified"
+		}
+		
+		if strings.HasPrefix(host, ".") {
+			hostOnly = 0
+		} else {
+			hostOnly = 1
 		}
 
 		cookie := cookie{
@@ -75,11 +95,13 @@ func (c *ChromiumCookie) Extract(masterKey []byte) error {
 			encryptValue: encryptValue,
 			IsSecure:     typeutil.IntToBool(isSecure),
 			IsHTTPOnly:   typeutil.IntToBool(isHTTPOnly),
-			HasExpire:    typeutil.IntToBool(hasExpire),
-			IsPersistent: typeutil.IntToBool(isPersistent),
-			CreateDate:   typeutil.TimeEpoch(createDate),
-			ExpireDate:   typeutil.TimeEpoch(expireDate),
+			Session:      !typeutil.IntToBool(isPersistent),
+			ExpireDate:   (float64(expireDate) - 11644473600000000) / 1000 / 1000,
+			SameSite:	  siteFlag,
+			IsHostKey:    typeutil.IntToBool(hostOnly),
+			StoreId:	  "0",
 		}
+		
 		if len(encryptValue) > 0 {
 			if len(masterKey) == 0 {
 				value, err = crypto.DecryptWithDPAPI(encryptValue)
@@ -90,12 +112,12 @@ func (c *ChromiumCookie) Extract(masterKey []byte) error {
 				slog.Error("decrypt chromium cookie error", "err", err)
 			}
 		}
+		
 		cookie.Value = string(value)
+
 		*c = append(*c, cookie)
 	}
-	sort.Slice(*c, func(i, j int) bool {
-		return (*c)[i].CreateDate.After((*c)[j].CreateDate)
-	})
+
 	return nil
 }
 
@@ -141,15 +163,11 @@ func (f *FirefoxCookie) Extract(_ []byte) error {
 			Path:       path,
 			IsSecure:   typeutil.IntToBool(isSecure),
 			IsHTTPOnly: typeutil.IntToBool(isHTTPOnly),
-			CreateDate: typeutil.TimeStamp(creationTime / 1000000),
-			ExpireDate: typeutil.TimeStamp(expiry),
+			ExpireDate: (float64(expiry) - 11644473600000000) / 1000 / 1000,
 			Value:      value,
 		})
 	}
 
-	sort.Slice(*f, func(i, j int) bool {
-		return (*f)[i].CreateDate.After((*f)[j].CreateDate)
-	})
 	return nil
 }
 

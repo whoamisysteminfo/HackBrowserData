@@ -23,6 +23,17 @@ type Chromium struct {
 	Paths       map[types.DataType]string
 }
 
+func containsPath(dict map[types.DataType]string, path string) bool {
+	for _, value := range dict {
+		value = strings.ReplaceAll(value, "\\", "/")
+		path = strings.ReplaceAll(path, "\\", "/")
+		if strings.Contains(value, path) {
+			return true
+		}
+	}
+	return false
+}
+
 // New create instance of Chromium browser, fill item's path if item is existed.
 func New(name, storage, profilePath string, dataTypes []types.DataType) ([]*Chromium, error) {
 	c := &Chromium{
@@ -37,12 +48,15 @@ func New(name, storage, profilePath string, dataTypes []types.DataType) ([]*Chro
 	}
 	chromiumList := make([]*Chromium, 0, len(multiDataTypePaths))
 	for user, itemPaths := range multiDataTypePaths {
-		chromiumList = append(chromiumList, &Chromium{
-			name:      fileutil.BrowserName(name, user),
-			dataTypes: typeutil.Keys(itemPaths),
-			Paths:     itemPaths,
-			storage:   storage,
-		})
+		if containsPath(itemPaths, profilePath) {
+			chromiumList = append(chromiumList, &Chromium{
+				name:      fileutil.BrowserName(name, user),
+				dataTypes: typeutil.Keys(itemPaths),
+				Paths:     itemPaths,
+				storage:   storage,
+			})
+		}
+
 	}
 	return chromiumList, nil
 }
